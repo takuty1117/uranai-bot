@@ -24,8 +24,8 @@ class MyBot(discord.Client):
             return
 
         if message.content == "今日の占い":
-            Auth = "/Users/t.n/Desktop/uranai/uranai-436517-66021ced1872.json"  # GoogleサービスのJSONファイルのパス
-            os.environ['GOOGLE_APPLICATION_CREDENTIALS'] = Auth
+            # 環境変数からGoogleサービスのJSONファイルのパスを取得
+            Auth = os.getenv('GOOGLE_APPLICATION_CREDENTIALS')  # 環境変数からパスを取得
             scope = ['https://spreadsheets.google.com/feeds']
             credentials = ServiceAccountCredentials.from_json_keyfile_name(Auth, scope)
             client = gspread.authorize(credentials)
