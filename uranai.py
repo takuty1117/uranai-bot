@@ -2,13 +2,18 @@ import os
 import discord
 import random
 from flask import Flask
-import asyncio
+import threading
 
 app = Flask(__name__)
 
 @app.route('/')
 def hello():
     return "Bot is running!"
+
+# Flaskサーバーを別スレッドで実行する
+def run_flask():
+    port = int(os.environ.get("PORT", 5000))
+    app.run(host="0.0.0.0", port=port)
 
 # Botの部分はそのまま
 class MyBot(discord.Client):
@@ -123,15 +128,10 @@ TOKEN = os.getenv('DISCORD_BOT_TOKEN')
 
 client = MyBot(intents=intents)
 
-async def run_bot():
-    await client.start(TOKEN)
-
 if __name__ == "__main__":
-    # 非同期のFlaskとdiscordボットを並行して動かす
-    loop = asyncio.get_event_loop()
+    # Flaskを別スレッドで起動
+    flask_thread = threading.Thread(target=run_flask)
+    flask_thread.start()
 
-    # Flaskをバックグラウンドで実行
-    loop.create_task(app.run_task(host="0.0.0.0", port=int(os.environ.get("PORT", 5000))))
-
-    # discord.pyのクライアントを実行
-    loop.run_until_complete(run_bot())
+    # Discord botを実行
+    client.run(TOKEN)
