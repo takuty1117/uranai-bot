@@ -1,6 +1,13 @@
 import os
 import discord
 import random
+from flask import Flask
+
+app = Flask(__name__)
+
+@app.route('/')
+def hello():
+    return "Bot is running!"
 
 # DiscordのBotクラスを作成
 class MyBot(discord.Client):
@@ -8,13 +15,10 @@ class MyBot(discord.Client):
         print(f'Logged in as {self.user}')
 
     async def on_message(self, message):
-        # 自分自身のメッセージは無視する
         if message.author == self.user:
             return
 
-        # メッセージが「今日の占い」だった場合
         if message.content == '今日の占い':
-            # 100種類のランダムな占い結果
             fortunes = [
                 # 1. オーソドックスな占い
                 "大吉\n今日は何をやっても成功しそう！",
@@ -109,16 +113,16 @@ class MyBot(discord.Client):
                 "貯金運\n貯金を増やすことに成功する日。",
                 "借金運\n今日は借金を返すと運気が上がるでしょう。"
             ]
-            # ランダムに一つ選ぶ
             fortune = random.choice(fortunes)
             await message.reply(f'今日の占い:\n{fortune}', mention_author=True)
 
-# Botを起動するためのコード
 intents = discord.Intents.default()
 intents.message_content = True
-
-# DiscordのBotトークンを環境変数から取得
 TOKEN = os.getenv('DISCORD_BOT_TOKEN')
 
 client = MyBot(intents=intents)
-client.run(TOKEN)  # トークンは環境変数から取得する
+
+if __name__ == "__main__":
+    port = int(os.environ.get("PORT", 5000))
+    client.loop.create_task(app.run_task(host="0.0.0.0", port=port))
+    client.run(TOKEN)
