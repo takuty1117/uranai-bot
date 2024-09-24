@@ -20,25 +20,35 @@ class MyBot(discord.Client):
         print(f'Logged in as {self.user}')
 
     async def on_message(self, message):
+        print(f"Message received: {message.content}")  # メッセージを受け取った際に内容を表示する
+
         if message.author.bot:
             return
 
         if message.content == "今日の占い":
-            # 環境変数からGoogleサービスのJSONファイルのパスを取得
-            Auth = os.getenv('GOOGLE_APPLICATION_CREDENTIALS')  # 環境変数からパスを取得
-            scope = ['https://spreadsheets.google.com/feeds']
-            credentials = ServiceAccountCredentials.from_json_keyfile_name(Auth, scope)
-            client = gspread.authorize(credentials)
+            print("Fortune-telling command received!")  # "今日の占い" コマンドを受け取ったら表示
 
-            # スプレッドシートに接続
-            spreadsheet = client.open_by_key("1zIrZKLGHeYuhEHUvSn75qnZD5P7escBYZnL-3dvsNGs")
-            raw_data = spreadsheet.worksheet("シート1")
-            data = pd.DataFrame(raw_data.get_all_values())
+            try:
+                # 環境変数からGoogleサービスのJSONファイルのパスを取得
+                Auth = os.getenv('GOOGLE_APPLICATION_CREDENTIALS')  # 環境変数からパスを取得
+                scope = ['https://spreadsheets.google.com/feeds']
+                credentials = ServiceAccountCredentials.from_json_keyfile_name(Auth, scope)
+                client = gspread.authorize(credentials)
 
-            # ランダムに占い結果を選ぶ
-            n = random.randint(0, len(data) - 1)
-            uranai = data.iloc[n, 0] + '\n' + data.iloc[n, 1]
-            await message.channel.send(uranai)
+                # スプレッドシートに接続
+                spreadsheet = client.open_by_key("1zIrZKLGHeYuhEHUvSn75qnZD5P7escBYZnL-3dvsNGs")
+                raw_data = spreadsheet.worksheet("シート1")
+                data = pd.DataFrame(raw_data.get_all_values())
+                print("Google Sheets accessed successfully.")  # スプレッドシートが正常にアクセスできたら表示
+
+                # ランダムに占い結果を選ぶ
+                n = random.randint(0, len(data) - 1)
+                uranai = data.iloc[n, 0] + '\n' + data.iloc[n, 1]
+                print(f"Sending fortune result: {uranai}")  # 占い結果を表示
+                await message.channel.send(uranai)
+            except Exception as e:
+                print(f"Error accessing Google Sheets: {e}")  # エラーメッセージを表示
+                await message.channel.send("エラーが発生しました。占いを取得できませんでした。")
 
 # Discordボットを起動
 intents = discord.Intents.default()
