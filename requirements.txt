@@ -7,9 +7,10 @@ frozenlist==1.4.1
 idna==3.10
 multidict==6.1.0
 yarl==1.11.1
-Flask==2.0.1
+Flask==2.0.3  # 修正
+werkzeug==2.0.3  # 追加
 gunicorn==20.1.0
 gspread==5.4.0
 oauth2client==4.1.3
-pandas==1.5.3
-numpy==1.23.5
+pandas==2.0.3  
+numpy==1.24.0  
