@@ -6,6 +6,7 @@ import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 from flask import Flask
 import threading
+import traceback  # エラーの詳細を出力するために追加
 
 # Flaskアプリケーションを定義
 app = Flask(__name__)
@@ -30,7 +31,11 @@ class MyBot(discord.Client):
 
             try:
                 # 環境変数からGoogleサービスのJSONファイルのパスを取得
-                Auth = os.getenv('GOOGLE_APPLICATION_CREDENTIALS')  # 環境変数からパスを取得
+                Auth = os.getenv('GOOGLE_APPLICATION_CREDENTIALS')
+                if not Auth or not os.path.exists(Auth):
+                    raise FileNotFoundError(f"認証ファイルが見つかりません: {Auth}")
+
+                print(f"Using Google credentials from: {Auth}")
                 scope = ['https://spreadsheets.google.com/feeds']
                 credentials = ServiceAccountCredentials.from_json_keyfile_name(Auth, scope)
                 client = gspread.authorize(credentials)
@@ -46,8 +51,10 @@ class MyBot(discord.Client):
                 uranai = data.iloc[n, 0] + '\n' + data.iloc[n, 1]
                 print(f"Sending fortune result: {uranai}")  # 占い結果を表示
                 await message.channel.send(uranai)
+
             except Exception as e:
                 print(f"Error accessing Google Sheets: {e}")  # エラーメッセージを表示
+                traceback.print_exc()  # 詳細なエラー内容を出力
                 await message.channel.send("エラーが発生しました。占いを取得できませんでした。")
 
 # Discordボットを起動
