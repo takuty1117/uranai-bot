@@ -6,7 +6,18 @@ import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 from flask import Flask
 import threading
+import base64  # Base64デコード用
 import traceback  # エラーの詳細を出力するために追加
+
+
+# Base64でエンコードされたGoogle認証情報をファイルとして保存
+credentials_b64 = os.getenv("GOOGLE_CREDENTIALS_B64")
+if credentials_b64:
+    with open("credentials.json", "wb") as f:
+        f.write(base64.b64decode(credentials_b64))
+    os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = "credentials.json"
+else:
+    print("GOOGLE_CREDENTIALS_B64 環境変数が設定されていません。")
 
 # Flaskアプリケーションを定義
 app = Flask(__name__)
