@@ -6,9 +6,9 @@ import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 from flask import Flask
 import threading
-import base64  # Base64デコード用
-import traceback  # エラーの詳細を出力するために追加
-from discord.ext import commands  # commands.Botに変更
+import base64
+import traceback
+import asyncio  # 非同期処理のために追加
 
 # Base64でエンコードされたGoogle認証情報をファイルとして保存
 credentials_b64 = os.getenv("GOOGLE_CREDENTIALS_B64")
@@ -27,19 +27,18 @@ def hello():
     return "Bot is running!"
 
 # Discordボットクラスの定義
-class MyBot(commands.Bot):  # commands.Botに変更
+class MyBot(discord.Client):
     async def on_ready(self):
         print(f'Logged in as {self.user}')
-        print(f"Bot is connected to Discord!")
 
     async def on_message(self, message):
-        print(f"Message received: {message.content}")
+        print(f"Message received: {message.content}")  # メッセージを受け取った際に内容を表示する
 
         if message.author.bot:
             return
 
         if message.content == "今日の占い":
-            print("Fortune-telling command received!")
+            print("Fortune-telling command received!")  # "今日の占い" コマンドを受け取ったら表示
 
             try:
                 # 環境変数からGoogleサービスのJSONファイルのパスを取得
@@ -56,30 +55,37 @@ class MyBot(commands.Bot):  # commands.Botに変更
                 spreadsheet = client.open_by_key("1zIrZKLGHeYuhEHUvSn75qnZD5P7escBYZnL-3dvsNGs")
                 raw_data = spreadsheet.worksheet("シート1")
                 data = pd.DataFrame(raw_data.get_all_values())
-                print("Google Sheets accessed successfully.")
+                print("Google Sheets accessed successfully.")  # スプレッドシートが正常にアクセスできたら表示
 
                 # ランダムに占い結果を選ぶ
                 n = random.randint(0, len(data) - 1)
                 uranai = data.iloc[n, 0] + '\n' + data.iloc[n, 1]
-                print(f"Sending fortune result: {uranai}")
+                print(f"Sending fortune result: {uranai}")  # 占い結果を表示
                 await message.channel.send(uranai)
 
             except Exception as e:
-                print(f"Error accessing Google Sheets: {e}")
-                traceback.print_exc()
+                print(f"Error accessing Google Sheets: {e}")  # エラーメッセージを表示
+                traceback.print_exc()  # 詳細なエラー内容を出力
                 await message.channel.send("エラーが発生しました。占いを取得できませんでした。")
 
 # Discordボットを起動
 intents = discord.Intents.default()
 intents.message_content = True
-
-# commands.Botを使って再接続を自動的に行うようにする
-client = MyBot(command_prefix="!", intents=intents)
+client = MyBot(intents=intents)
 
 # Flaskを別スレッドで実行する関数
 def run_flask():
-    port = int(os.environ.get("PORT", 5001))
+    port = int(os.environ.get("PORT", 5001))  # デフォルトでポート5001を使用
     app.run(host="0.0.0.0", port=port)
+
+# 再接続ロジックを追加
+async def start_bot():
+    while True:
+        try:
+            await client.start(os.getenv('DISCORD_BOT_TOKEN'))
+        except Exception as e:
+            print(f"Error occurred: {e}")
+            await asyncio.sleep(5)  # エラー発生時に5秒待って再接続
 
 # アプリを起動する部分
 if __name__ == "__main__":
@@ -87,5 +93,5 @@ if __name__ == "__main__":
     flask_thread = threading.Thread(target=run_flask)
     flask_thread.start()
     
-    # Discordボットを実行
-    client.run(os.getenv('DISCORD_BOT_TOKEN'), reconnect=True)  # reconnect=Trueで自動再接続
+    # Discordボットを実行（再接続ロジック）
+    asyncio.run(start_bot())
