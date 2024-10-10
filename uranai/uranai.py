@@ -73,6 +73,11 @@ intents = discord.Intents.default()
 intents.message_content = True
 client = MyBot(intents=intents)
 
+# Flaskを別スレッドで実行する関数
+def run_flask():
+    port = int(os.environ.get("PORT", 5001))  # デフォルトでポート5001を使用
+    app.run(host="0.0.0.0", port=port)
+
 # 再接続ロジックを追加
 async def start_bot():
     while True:
@@ -84,7 +89,9 @@ async def start_bot():
 
 # アプリを起動する部分
 if __name__ == "__main__":
-    # Flaskサーバーはgunicornによって起動されるため、ここでは直接実行しない
+    # Flaskを別スレッドで実行
+    flask_thread = threading.Thread(target=run_flask)
+    flask_thread.start()
     
     # Discordボットを実行（再接続ロジック）
     asyncio.run(start_bot())
