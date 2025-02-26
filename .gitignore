@@ -4,6 +4,7 @@
 
 # Python 仮想環境
 myenv/
+venv/
 
 # メディアファイルなど
 *.mp4
@@ -17,6 +18,5 @@ wallpaper/
 credentials.json
 encode_base64.py
 encoded_credentials.txt
+uranai-436517-6649e8c2871c.json
 
-# ただし、uranai-436517-66021ced1872.json は含める
-!uranai-436517-66021ced1872.json
