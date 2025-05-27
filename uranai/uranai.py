@@ -1,4 +1,6 @@
 import os
+from dotenv import load_dotenv
+load_dotenv()# 追加
 import discord
 import random
 import pandas as pd
@@ -10,6 +12,9 @@ import base64
 import traceback
 import asyncio
 import time  # キャッシュのためのタイムスタンプ取得用
+
+# .env ファイルを読み込む
+load_dotenv()
 
 # Base64でエンコードされたGoogle認証情報をファイルとして保存
 credentials_b64 = os.getenv("GOOGLE_CREDENTIALS_B64")
@@ -81,7 +86,7 @@ class MyBot(discord.Client):
             except Exception as e:
                 print(f"Error accessing Google Sheets: {e}")
                 traceback.print_exc()
-                await message.channel.send("エラーが発生しました。占いを取得できませんでした。")
+                await message.channel.send("エラーが発生しました。もう一度「今日の占い」と打ち込んでみてね〜")
 
 # Discordボットを起動
 intents = discord.Intents.default()
