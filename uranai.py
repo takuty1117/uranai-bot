@@ -6,7 +6,7 @@ import random
 import pandas as pd
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
-import base64
+import base64 # ★ base66 ではなく base64 が正しい
 import traceback
 import asyncio
 import time
@@ -16,31 +16,30 @@ from flask import Flask # ★ Flaskを追加
 # .env ファイルを読み込む
 load_dotenv()
 
-# --- Google認証情報の設定 (変更なし) ---
+# --- Google認証情報の設定 (修正済み) ---
 credentials_b64 = os.getenv("GOOGLE_CREDENTIALS_B64")
 if credentials_b64:
     with open("credentials.json", "wb") as f:
-        f.write(base66.b64decode(credentials_b64))
+        # ↓↓↓ ここがエラーの原因でした！ base66 を base64 に修正 ↓↓↓
+        f.write(base64.b64decode(credentials_b64))
     os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = "credentials.json"
 else:
-    print("GOOGLE_CREDENTIALS_B64 環境変数が設定されていません。")
+    print("GOOGLE_CREDENTIALS_B64 環境変数が設定されていません。") # ←前回このエラーが出ていた
 
 # --- Flask (Webサーバー) の設定 ---
-# Renderがスリープしないように、外部からアクセスできるWebページを作る
 app = Flask(__name__)
 
 @app.route('/')
 def hello():
-    # このページが外部からアクセスされることで、Renderのスリープを防ぎます
     return "占いBot、元気に稼働中！"
 
-# --- キャッシュ用グローバル変数 (変更なし) ---
+# --- キャッシュ用グローバル変数 ---
 cache = {"timestamp": 0, "result": None}
 
-# --- Discordボットクラスの定義 (変更なし) ---
+# --- Discordボットクラスの定義 ---
 class MyBot(discord.Client):
     async def on_ready(self):
-        print(f'Logged in as {self.user}')
+        print(f'Logged in as {self.user}') # ← Botが成功するとこれが出る
 
     async def on_message(self, message):
         print(f"Message received: {message.content}")
@@ -91,12 +90,11 @@ client = MyBot(intents=intents)
 
 # Botを別スレッドで実行するための関数
 def run_bot():
-    # asyncioイベントループをスレッド内で作成・実行
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
     
     try:
-        # Botを起動し、完了するまで待つ
+        # ↓↓↓ ここで DISCORD_BOT_TOKEN が使われる ↓↓↓
         loop.run_until_complete(client.start(os.getenv('DISCORD_BOT_TOKEN')))
     except Exception as e:
         print(f"Botスレッドでエラーが発生: {e}")
@@ -110,7 +108,5 @@ if __name__ == "__main__":
     bot_thread.start()
     
     # 2. Flask Webサーバーを「メインスレッド」（表側）で起動
-    # RenderはPORT環境変数で待ち受けるポート番号を指定してきます
     port = int(os.environ.get("PORT", 5001))
-    # '0.0.0.0' で外部からのアクセスを受け付けられるようにします
     app.run(host="0.0.0.0", port=port)
