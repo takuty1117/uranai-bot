@@ -23,7 +23,6 @@ if credentials_b64:
         f.write(base64.b64decode(credentials_b64))
     os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = "credentials.json"
 else:
-    # このプリントは起動時に一度だけ表示される
     print("★★★ (診断) GOOGLE_CREDENTIALS_B64 が .env または環境変数に見つかりません。")
 
 # --- Flask (Webサーバー) の設定 ---
@@ -39,7 +38,7 @@ cache = {"timestamp": 0, "result": None}
 # --- Discordボットクラスの定義 ---
 class MyBot(discord.Client):
     async def on_ready(self):
-        print(f'★★★ ログイン成功！ Bot名: {self.user} ★★★') # ← Botが成功するとこれが出る
+        print(f'★★★ ログイン成功！ Bot名: {self.user} ★★★') 
 
     async def on_message(self, message):
         print(f"Message received: {message.content}")
@@ -51,10 +50,12 @@ class MyBot(discord.Client):
             print("Fortune-telling command received!")
             try:
                 current_time = time.time()
+                # 60秒間のキャッシュ確認
                 if current_time - cache["timestamp"] < 60 and cache["result"] is not None:
                     uranai = cache["result"]
-                    print("Using cached fortune result.")
+                    print(f"Using cached fortune result (cache expires in {60 - (current_time - cache["timestamp"]):.0f} sec).")
                 else:
+                    print("Cache expired or empty. Fetching from Google Sheets...")
                     Auth = os.getenv('GOOGLE_APPLICATION_CREDENTIALS')
                     if not Auth or not os.path.exists(Auth):
                         raise FileNotFoundError(f"認証ファイルが見つかりません: {Auth}")
@@ -67,11 +68,17 @@ class MyBot(discord.Client):
                     spreadsheet = gs_client.open_by_key("1zIrZKLGHeYuhEHUvSn75qnZD5P7escBYZnL-3dvsNGs")
                     raw_data = spreadsheet.worksheet("シート1")
                     data = pd.DataFrame(raw_data.get_all_values())
-                    print("Google Sheets accessed successfully.")
+                    print(f"Google Sheets accessed successfully. Total rows (including header): {len(data)}")
 
-                    n = random.randint(0, len(data) - 1)
+                    # ↓↓↓ ここがバグ修正箇所！ ↓↓↓
+                    # ヘッダー行(インデックス 0)を避け、インデックス 1 (2行目) から
+                    # 最後の行 (len(data) - 1) までの間でランダムに選ぶ
+                    n = random.randint(1, len(data) - 1) 
+                    
                     uranai = data.iloc[n, 0] + '\n' + data.iloc[n, 1]
+                    print(f"Randomly picked row index: {n}")
 
+                    # キャッシュを更新
                     cache["timestamp"] = current_time
                     cache["result"] = uranai
 
@@ -98,22 +105,19 @@ def run_bot(token):
         loop.run_until_complete(client.start(token))
     except Exception as e:
         print(f"★★★ Botスレッドで致命的なエラーが発生: {e} ★★★")
-        traceback.print_exc() # エラーの詳細をログに出力
+        traceback.print_exc() 
     finally:
         loop.close()
 
-# --- アプリを起動する部分 (診断コード追加) ---
+# --- アプリを起動する部分 ---
 if __name__ == "__main__":
     
-    # ★★★↓ ここから診断コード ↓★★★
     print("--- 起動診断開始 ---")
     bot_token = os.getenv('DISCORD_BOT_TOKEN')
 
     if bot_token:
-        # トークン全体をログに出すのは危険なので、末尾6文字だけ表示
         print(f"DISCORD_BOT_TOKEN: 読み込み成功 (末尾: ...{bot_token[-6:]})")
         
-        # 1. Discord Botを「別スレッド」（裏側）で起動
         print("Botスレッドを起動します...")
         bot_thread = threading.Thread(target=run_bot, args=(bot_token,))
         bot_thread.start()
@@ -123,6 +127,5 @@ if __name__ == "__main__":
         print("★★★ Botスレッドは起動できませんでした。 ★★★")
     
     print("--- 診断終了。Webサーバーを起動します... ---")
-    # 2. Flask Webサーバーを「メインスレッド」（表側）で起動
     port = int(os.environ.get("PORT", 5001))
     app.run(host="0.0.0.0", port=port)
