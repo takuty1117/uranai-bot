@@ -9,7 +9,7 @@ from oauth2client.service_account import ServiceAccountCredentials
 import base64
 import traceback
 import asyncio
-import time
+# import time # キャッシュ機能と一緒に削除
 import threading
 from flask import Flask
 
@@ -32,8 +32,8 @@ app = Flask(__name__)
 def hello():
     return "占いBot、元気に稼働中！"
 
-# --- キャッシュ用グローバル変数 ---
-cache = {"timestamp": 0, "result": None}
+# --- キャッシュ用グローバル変数を削除 ---
+# cache = {"timestamp": 0, "result": None} # 削除
 
 # --- Discordボットクラスの定義 ---
 class MyBot(discord.Client):
@@ -49,38 +49,34 @@ class MyBot(discord.Client):
         if message.content == "今日の占い":
             print("Fortune-telling command received!")
             try:
-                current_time = time.time()
-                # 60秒間のキャッシュ確認
-                if current_time - cache["timestamp"] < 60 and cache["result"] is not None:
-                    uranai = cache["result"]
-                    print(f"Using cached fortune result (cache expires in {60 - (current_time - cache["timestamp"]):.0f} sec).")
-                else:
-                    print("Cache expired or empty. Fetching from Google Sheets...")
-                    Auth = os.getenv('GOOGLE_APPLICATION_CREDENTIALS')
-                    if not Auth or not os.path.exists(Auth):
-                        raise FileNotFoundError(f"認証ファイルが見つかりません: {Auth}")
+                # --- キャッシュのIF文をすべて削除 ---
+                # if current_time ... else: を削除し、常にGoogle Sheetsから取得
+                
+                print("Cache removed. Always fetching from Google Sheets...")
+                Auth = os.getenv('GOOGLE_APPLICATION_CREDENTIALS')
+                if not Auth or not os.path.exists(Auth):
+                    raise FileNotFoundError(f"認証ファイルが見つかりません: {Auth}")
 
-                    print(f"Using Google credentials from: {Auth}")
-                    scope = ['https://spreadsheets.google.com/feeds']
-                    credentials = ServiceAccountCredentials.from_json_keyfile_name(Auth, scope)
-                    gs_client = gspread.authorize(credentials)
+                print(f"Using Google credentials from: {Auth}")
+                scope = ['https://spreadsheets.google.com/feeds']
+                credentials = ServiceAccountCredentials.from_json_keyfile_name(Auth, scope)
+                gs_client = gspread.authorize(credentials)
 
-                    spreadsheet = gs_client.open_by_key("1zIrZKLGHeYuhEHUvSn75qnZD5P7escBYZnL-3dvsNGs")
-                    raw_data = spreadsheet.worksheet("シート1")
-                    data = pd.DataFrame(raw_data.get_all_values())
-                    print(f"Google Sheets accessed successfully. Total rows (including header): {len(data)}")
+                spreadsheet = gs_client.open_by_key("1zIrZKLGHeYuhEHUvSn75qnZD5P7escBYZnL-3dvsNGs")
+                raw_data = spreadsheet.worksheet("シート1")
+                data = pd.DataFrame(raw_data.get_all_values())
+                print(f"Google Sheets accessed successfully. Total rows (including header): {len(data)}")
 
-                    # ↓↓↓ ここがバグ修正箇所！ ↓↓↓
-                    # ヘッダー行(インデックス 0)を避け、インデックス 1 (2行目) から
-                    # 最後の行 (len(data) - 1) までの間でランダムに選ぶ
-                    n = random.randint(1, len(data) - 1) 
-                    
-                    uranai = data.iloc[n, 0] + '\n' + data.iloc[n, 1]
-                    print(f"Randomly picked row index: {n}")
+                # ヘッダー行(インデックス 0)を避け、インデックス 1 (2行目) から
+                # 最後の行 (len(data) - 1) までの間でランダムに選ぶ
+                n = random.randint(1, len(data) - 1) 
+                
+                uranai = data.iloc[n, 0] + '\n' + data.iloc[n, 1]
+                print(f"Randomly picked row index: {n}")
 
-                    # キャッシュを更新
-                    cache["timestamp"] = current_time
-                    cache["result"] = uranai
+                # --- キャッシュ更新のコードを削除 ---
+                # cache["timestamp"] = current_time
+                # cache["result"] = uranai
 
                 print(f"Sending fortune result: {uranai}")
                 await message.channel.send(uranai)
