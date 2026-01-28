@@ -12,6 +12,7 @@ import asyncio
 import threading
 from flask import Flask
 import logging
+import math  # レイテンシの計算エラー回避用
 
 # .env ファイルを読み込む
 load_dotenv()
@@ -34,9 +35,18 @@ app = Flask(__name__)
 
 @app.route('/')
 def health_check():
-    # 自己検証機能: ブラウザでアクセスした時にBotの状態を返す
-    status = "Online" if not client.is_closed() and client.is_ready() else "Offline/Connecting"
-    latency = f"{round(client.latency * 1000)}ms" if client.latency and client.latency != float('inf') else "N/A"
+    # 1. 自己検証機能: BotがDiscordに接続できているか判定
+    is_ready = not client.is_closed() and client.is_ready()
+    status = "Online" if is_ready else "Offline/Connecting"
+    
+    # 2. レイテンシの計算（NaNエラー回避ロジック）
+    latency_val = client.latency
+    if is_ready and latency_val is not None and not math.isnan(latency_val):
+        latency = f"{round(latency_val * 1000)}ms"
+    else:
+        # 起動直後や接続が不安定な場合はこちら
+        latency = "Calculating..."
+        
     return f"Bot Status: {status}<br>Latency: {latency}<br><br>占いBot、元気に稼働中！", 200
 
 # --- Discordボットクラスの定義 ---
@@ -45,7 +55,6 @@ class MyBot(discord.Client):
         print(f'★★★ ログイン成功！ Bot名: {self.user} ★★★') 
 
     async def on_error(self, event, *args, **kwargs):
-        # イベント発生時のエラーを詳細に記録
         print(f"！！！ イベントエラー発生 ({event}) ！！！")
         traceback.print_exc()
 
@@ -69,7 +78,6 @@ class MyBot(discord.Client):
                 raw_data = spreadsheet.worksheet("シート1")
                 data = pd.DataFrame(raw_data.get_all_values())
                 
-                # ヘッダーを除いてランダム抽出
                 n = random.randint(1, len(data) - 1) 
                 uranai = data.iloc[n, 0] + '\n' + data.iloc[n, 1]
                 
@@ -121,6 +129,5 @@ if __name__ == "__main__":
         print("★★★ 致命的エラー: DISCORD_BOT_TOKEN が見つかりません。 ★★★")
     
     print("--- 診断終了。Webサーバーを起動します... ---")
-    # Renderのポート番号に対応
     port = int(os.environ.get("PORT", 10000))
     app.run(host="0.0.0.0", port=port)
