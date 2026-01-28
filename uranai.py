@@ -1,7 +1,7 @@
 import os
 from dotenv import load_dotenv
-load_dotenv()
 import discord
+from discord import HTTPException
 import random
 import pandas as pd
 import gspread
@@ -9,12 +9,16 @@ from oauth2client.service_account import ServiceAccountCredentials
 import base64
 import traceback
 import asyncio
-# import time # キャッシュ機能と一緒に削除
 import threading
 from flask import Flask
+import logging
 
 # .env ファイルを読み込む
 load_dotenv()
+
+# --- ログ設定 ---
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger('uranai_bot')
 
 # --- Google認証情報の設定 ---
 credentials_b64 = os.getenv("GOOGLE_CREDENTIALS_B64")
@@ -23,62 +27,53 @@ if credentials_b64:
         f.write(base64.b64decode(credentials_b64))
     os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = "credentials.json"
 else:
-    print("★★★ (診断) GOOGLE_CREDENTIALS_B64 が .env または環境変数に見つかりません。")
+    print("★★★ (診断) GOOGLE_CREDENTIALS_B64 が見つかりません。")
 
 # --- Flask (Webサーバー) の設定 ---
 app = Flask(__name__)
 
 @app.route('/')
-def hello():
-    return "占いBot、元気に稼働中！"
-
-# --- キャッシュ用グローバル変数を削除 ---
-# cache = {"timestamp": 0, "result": None} # 削除
+def health_check():
+    # 自己検証機能: ブラウザでアクセスした時にBotの状態を返す
+    status = "Online" if not client.is_closed() and client.is_ready() else "Offline/Connecting"
+    latency = f"{round(client.latency * 1000)}ms" if client.latency and client.latency != float('inf') else "N/A"
+    return f"Bot Status: {status}<br>Latency: {latency}<br><br>占いBot、元気に稼働中！", 200
 
 # --- Discordボットクラスの定義 ---
 class MyBot(discord.Client):
     async def on_ready(self):
         print(f'★★★ ログイン成功！ Bot名: {self.user} ★★★') 
 
-    async def on_message(self, message):
-        print(f"Message received: {message.content}")
+    async def on_error(self, event, *args, **kwargs):
+        # イベント発生時のエラーを詳細に記録
+        print(f"！！！ イベントエラー発生 ({event}) ！！！")
+        traceback.print_exc()
 
+    async def on_message(self, message):
         if message.author.bot:
             return
 
         if message.content == "今日の占い":
             print("Fortune-telling command received!")
             try:
-                # --- キャッシュのIF文をすべて削除 ---
-                # if current_time ... else: を削除し、常にGoogle Sheetsから取得
-                
-                print("Cache removed. Always fetching from Google Sheets...")
+                print("Fetching from Google Sheets...")
                 Auth = os.getenv('GOOGLE_APPLICATION_CREDENTIALS')
                 if not Auth or not os.path.exists(Auth):
                     raise FileNotFoundError(f"認証ファイルが見つかりません: {Auth}")
 
-                print(f"Using Google credentials from: {Auth}")
-                scope = ['https://spreadsheets.google.com/feeds']
+                scope = ['https://spreadsheets.google.com/feeds', 'https://www.googleapis.com/auth/drive']
                 credentials = ServiceAccountCredentials.from_json_keyfile_name(Auth, scope)
                 gs_client = gspread.authorize(credentials)
 
                 spreadsheet = gs_client.open_by_key("1zIrZKLGHeYuhEHUvSn75qnZD5P7escBYZnL-3dvsNGs")
                 raw_data = spreadsheet.worksheet("シート1")
                 data = pd.DataFrame(raw_data.get_all_values())
-                print(f"Google Sheets accessed successfully. Total rows (including header): {len(data)}")
-
-                # ヘッダー行(インデックス 0)を避け、インデックス 1 (2行目) から
-                # 最後の行 (len(data) - 1) までの間でランダムに選ぶ
-                n = random.randint(1, len(data) - 1) 
                 
+                # ヘッダーを除いてランダム抽出
+                n = random.randint(1, len(data) - 1) 
                 uranai = data.iloc[n, 0] + '\n' + data.iloc[n, 1]
-                print(f"Randomly picked row index: {n}")
-
-                # --- キャッシュ更新のコードを削除 ---
-                # cache["timestamp"] = current_time
-                # cache["result"] = uranai
-
-                print(f"Sending fortune result: {uranai}")
+                
+                print(f"Sending result (Row {n}): {uranai[:20]}...")
                 await message.channel.send(uranai)
 
             except Exception as e:
@@ -91,37 +86,41 @@ intents = discord.Intents.default()
 intents.message_content = True
 client = MyBot(intents=intents)
 
-# Botを別スレッドで実行するための関数
 def run_bot(token):
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
     
     try:
-        print(f"★★★ Botスレッド: client.start() を実行します (トークン末尾: ...{token[-6:]}) ★★★")
+        print(f"★★★ Botスレッド: client.start() を実行します ★★★")
         loop.run_until_complete(client.start(token))
+    except HTTPException as e:
+        if e.status == 429:
+            print("\n" + "!"*50)
+            print("【致命的エラー】DiscordからIPブロック（Rate Limit）されています。")
+            print("対策：Renderの 'Manual Deploy' > 'Clear Cache & Deploy' を実行してください。")
+            print("!"*50 + "\n")
+        else:
+            print(f"★★★ HTTPエラー発生: {e} ★★★")
     except Exception as e:
-        print(f"★★★ Botスレッドで致命的なエラーが発生: {e} ★★★")
+        print(f"★★★ Botスレッドで予期せぬエラーが発生: {e} ★★★")
         traceback.print_exc() 
     finally:
         loop.close()
 
 # --- アプリを起動する部分 ---
 if __name__ == "__main__":
-    
     print("--- 起動診断開始 ---")
     bot_token = os.getenv('DISCORD_BOT_TOKEN')
 
     if bot_token:
-        print(f"DISCORD_BOT_TOKEN: 読み込み成功 (末尾: ...{bot_token[-6:]})")
-        
+        print(f"DISCORD_BOT_TOKEN: 読み込み成功")
         print("Botスレッドを起動します...")
-        bot_thread = threading.Thread(target=run_bot, args=(bot_token,))
+        bot_thread = threading.Thread(target=run_bot, args=(bot_token,), daemon=True)
         bot_thread.start()
-        
     else:
-        print("★★★ 致命的エラー: DISCORD_BOT_TOKEN が環境変数に見つかりません。 ★★★")
-        print("★★★ Botスレッドは起動できませんでした。 ★★★")
+        print("★★★ 致命的エラー: DISCORD_BOT_TOKEN が見つかりません。 ★★★")
     
     print("--- 診断終了。Webサーバーを起動します... ---")
-    port = int(os.environ.get("PORT", 5001))
+    # Renderのポート番号に対応
+    port = int(os.environ.get("PORT", 10000))
     app.run(host="0.0.0.0", port=port)
