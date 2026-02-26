@@ -98,7 +98,7 @@ class UnifiedBot(discord.Client):
             await self.handle_all(message)
 
     def _fetch_uranai(self):
-        """Fetch a random fortune from Google Sheets."""
+        """Fetch a random fortune. Returns (title, desc) or None."""
         gs_client = get_gspread_client()
         spreadsheet = gs_client.open_by_key(URANAI_SPREADSHEET_ID)
         worksheet = spreadsheet.worksheet("シート1")
@@ -113,10 +113,10 @@ class UnifiedBot(discord.Client):
             return None
         title, desc = random.choice(rows)
         logger.info(f"占い結果取得: {title}")
-        return title + "\n" + desc
+        return (title, desc)
 
     def _fetch_food(self):
-        """Fetch a random meal recommendation from Google Sheets."""
+        """Fetch a random meal. Returns (menu, url) or None."""
         gs_client = get_gspread_client()
         spreadsheet = gs_client.open_by_key(FOOD_SPREADSHEET_ID)
         worksheet = spreadsheet.worksheet("メニュー")
@@ -128,11 +128,7 @@ class UnifiedBot(discord.Client):
         ]
         if not rows:
             return None
-        menu, url = random.choice(rows)
-        result = f"今日のおすすめのご飯は【{menu}】！"
-        if url:
-            result += f"\nアレンジレシピは[こちら](<{url}>)"
-        return result
+        return random.choice(rows)
 
     async def handle_uranai(self, message):
         logger.info("占いコマンド受信")
@@ -141,7 +137,10 @@ class UnifiedBot(discord.Client):
             if not result:
                 await message.reply("占いデータが見つかりませんでした。")
                 return
-            await message.reply(result)
+            title, desc = result
+            embed = discord.Embed(title="🔮 今日の占い", color=0x9B59B6)
+            embed.add_field(name=title, value=desc or "\u200b", inline=False)
+            await message.reply(embed=embed)
         except Exception as e:
             logger.error(f"占い実行エラー: {e}")
             traceback.print_exc()
@@ -159,7 +158,13 @@ class UnifiedBot(discord.Client):
             if not result:
                 await message.reply("メニューが見つかりませんでした。")
                 return
-            await message.reply(result)
+            menu, url = result
+            embed = discord.Embed(title="🍽️ 今日のご飯", color=0xE67E22)
+            desc = f"**【{menu}】**"
+            if url:
+                desc += f"\n[アレンジレシピはこちら](<{url}>)"
+            embed.description = desc
+            await message.reply(embed=embed)
         except Exception as e:
             logger.error(f"メニュー取得エラー: {e}")
             traceback.print_exc()
@@ -167,27 +172,32 @@ class UnifiedBot(discord.Client):
 
     async def handle_all(self, message):
         logger.info("全部コマンド受信")
-        parts = []
+        embed = discord.Embed(title="✨ 今日の運勢", color=0x9B59B6)
         try:
             uranai = self._fetch_uranai()
             if uranai:
-                parts.append("🔮 **今日の占い**\n" + uranai)
+                title, desc = uranai
+                embed.add_field(name=f"🔮 {title}", value=desc or "\u200b", inline=False)
             else:
-                parts.append("🔮 **今日の占い**\n占いデータが見つかりませんでした。")
+                embed.add_field(name="🔮 占い", value="データが見つかりませんでした。", inline=False)
         except Exception as e:
             logger.error(f"占い実行エラー: {e}")
-            parts.append("🔮 **今日の占い**\n占いの取得に失敗しました…")
+            embed.add_field(name="🔮 占い", value="取得に失敗しました…", inline=False)
         try:
             if FOOD_SPREADSHEET_ID:
                 food = self._fetch_food()
                 if food:
-                    parts.append("🍽️ **今日のご飯**\n" + food)
+                    menu, url = food
+                    food_text = f"**【{menu}】**"
+                    if url:
+                        food_text += f"\n[アレンジレシピはこちら](<{url}>)"
+                    embed.add_field(name="🍽️ ご飯", value=food_text, inline=False)
                 else:
-                    parts.append("🍽️ **今日のご飯**\nメニューが見つかりませんでした。")
+                    embed.add_field(name="🍽️ ご飯", value="メニューが見つかりませんでした。", inline=False)
         except Exception as e:
             logger.error(f"メニュー取得エラー: {e}")
-            parts.append("🍽️ **今日のご飯**\nメニューの取得に失敗しました…")
-        await message.reply("\n\n".join(parts))
+            embed.add_field(name="🍽️ ご飯", value="取得に失敗しました…", inline=False)
+        await message.reply(embed=embed)
 
 
 if __name__ == "__main__":
