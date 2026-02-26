@@ -1,31 +1,36 @@
 import os
 import base64
+import json
 import random
 import traceback
-import asyncio
-import threading
-import math
 import logging
+import sys
 
 from dotenv import load_dotenv
 import discord
 from discord import HTTPException
+from aiohttp import web
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 import pandas as pd
-from flask import Flask
 
 load_dotenv()
 
 # --- Logging ---
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+)
 logger = logging.getLogger("unified_bot")
 
 # --- Google credentials ---
 credentials_b64 = os.getenv("GOOGLE_CREDENTIALS_B64")
 if credentials_b64:
-    with open("credentials.json", "wb") as f:
-        f.write(base64.b64decode(credentials_b64))
+    cred_data = json.loads(base64.b64decode(credentials_b64))
+    if "private_key" in cred_data:
+        cred_data["private_key"] = cred_data["private_key"].replace("\\n", "\n")
+    with open("credentials.json", "w") as f:
+        json.dump(cred_data, f)
     os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = "credentials.json"
 else:
     logger.error("GOOGLE_CREDENTIALS_B64 が見つかりません。")
@@ -35,6 +40,7 @@ URANAI_SPREADSHEET_ID = os.getenv(
     "URANAI_SPREADSHEET_ID", "1zIrZKLGHeYuhEHUvSn75qnZD5P7escBYZnL-3dvsNGs"
 )
 FOOD_SPREADSHEET_ID = os.getenv("FOOD_SPREADSHEET_ID", "")
+
 
 # --- Google Sheets helper ---
 def get_gspread_client():
@@ -49,39 +55,32 @@ def get_gspread_client():
     return gspread.authorize(credentials)
 
 
-# --- Flask ---
-app = Flask(__name__)
-
-
-@app.route("/")
-def health_check():
-    is_ready = not client.is_closed() and client.is_ready()
-    status = "Online" if is_ready else "Offline/Connecting"
-
-    latency_val = client.latency
-    if is_ready and latency_val is not None and not math.isnan(latency_val):
-        latency = f"{round(latency_val * 1000)}ms"
-    else:
-        latency = "Calculating..."
-
-    features = []
-    if URANAI_SPREADSHEET_ID:
-        features.append("占い")
-    if FOOD_SPREADSHEET_ID:
-        features.append("ご飯")
-
-    return (
-        f"Bot Status: {status}<br>"
-        f"Latency: {latency}<br>"
-        f"Features: {', '.join(features)}<br><br>"
-        f"統合Bot、元気に稼働中！"
-    ), 200
-
-
 # --- Discord Bot ---
 class UnifiedBot(discord.Client):
+    async def setup_hook(self):
+        """Start health check HTTP server for UptimeRobot / Render."""
+        app = web.Application()
+        app.router.add_get("/", self._health_check)
+        runner = web.AppRunner(app)
+        await runner.setup()
+        port = int(os.environ.get("PORT", 10000))
+        site = web.TCPSite(runner, "0.0.0.0", port)
+        await site.start()
+        logger.info(f"Health check server started on port {port}")
+
+    async def _health_check(self, request):
+        return web.Response(
+            text=f"OK | guilds={len(self.guilds)} | latency={self.latency:.2f}s"
+        )
+
     async def on_ready(self):
         logger.info(f"Logged in as {self.user} (guilds: {len(self.guilds)})")
+
+    async def on_disconnect(self):
+        logger.warning("Discord gateway disconnected. Waiting for auto-reconnect...")
+
+    async def on_resumed(self):
+        logger.info("Discord gateway session resumed.")
 
     async def on_error(self, event, *args, **kwargs):
         logger.error(f"Event error ({event})")
@@ -95,21 +94,54 @@ class UnifiedBot(discord.Client):
             await self.handle_uranai(message)
         elif message.content == "今日のご飯":
             await self.handle_food(message)
+        elif message.content == "今日の全部":
+            await self.handle_all(message)
+
+    def _fetch_uranai(self):
+        """Fetch a random fortune from Google Sheets."""
+        gs_client = get_gspread_client()
+        spreadsheet = gs_client.open_by_key(URANAI_SPREADSHEET_ID)
+        worksheet = spreadsheet.worksheet("シート1")
+        data = pd.DataFrame(worksheet.get_all_values())
+        rows = [
+            (str(row[0]).strip(), str(row[1]).strip() if len(row) > 1 else "")
+            for row in data.values.tolist()[1:]  # skip header
+            if str(row[0]).strip()
+        ]
+        if not rows:
+            logger.warning("占いデータが空です")
+            return None
+        title, desc = random.choice(rows)
+        logger.info(f"占い結果取得: {title}")
+        return title + "\n" + desc
+
+    def _fetch_food(self):
+        """Fetch a random meal recommendation from Google Sheets."""
+        gs_client = get_gspread_client()
+        spreadsheet = gs_client.open_by_key(FOOD_SPREADSHEET_ID)
+        worksheet = spreadsheet.worksheet("メニュー")
+        data = pd.DataFrame(worksheet.get_all_values())
+        rows = [
+            (row[0], row[1] if len(row) > 1 else "")
+            for row in data.values.tolist()
+            if row[0]
+        ]
+        if not rows:
+            return None
+        menu, url = random.choice(rows)
+        result = f"今日のおすすめのご飯は【{menu}】！"
+        if url:
+            result += f"\nアレンジレシピは[こちら](<{url}>)"
+        return result
 
     async def handle_uranai(self, message):
         logger.info("占いコマンド受信")
         try:
-            gs_client = get_gspread_client()
-            spreadsheet = gs_client.open_by_key(URANAI_SPREADSHEET_ID)
-            worksheet = spreadsheet.worksheet("シート1")
-            data = pd.DataFrame(worksheet.get_all_values())
-
-            n = random.randint(1, len(data) - 1)
-            result = data.iloc[n, 0] + "\n" + data.iloc[n, 1]
-
-            logger.info(f"占い結果送信 (Row {n})")
-            await message.channel.send(result)
-
+            result = self._fetch_uranai()
+            if not result:
+                await message.reply("占いデータが見つかりませんでした。")
+                return
+            await message.reply(result)
         except Exception as e:
             logger.error(f"占い実行エラー: {e}")
             traceback.print_exc()
@@ -121,77 +153,60 @@ class UnifiedBot(discord.Client):
         if not FOOD_SPREADSHEET_ID:
             logger.warning("FOOD_SPREADSHEET_ID が未設定")
             return
-
         logger.info("ご飯コマンド受信")
         try:
-            gs_client = get_gspread_client()
-            spreadsheet = gs_client.open_by_key(FOOD_SPREADSHEET_ID)
-            worksheet = spreadsheet.worksheet("メニュー")
-            data = pd.DataFrame(worksheet.get_all_values())
-
-            if data.empty:
+            result = self._fetch_food()
+            if not result:
                 await message.reply("メニューが見つかりませんでした。")
                 return
-
-            rows = [
-                (row[0], row[1] if len(row) > 1 else "")
-                for row in data.values.tolist()
-                if row[0]
-            ]
-
-            if not rows:
-                await message.reply("メニューが見つかりませんでした。")
-                return
-
-            menu, url = random.choice(rows)
-            reply = f"今日のおすすめのご飯は【{menu}】！"
-            if url:
-                reply += f"\nアレンジレシピは[こちら](<{url}>)"
-            await message.reply(reply)
-
+            await message.reply(result)
         except Exception as e:
             logger.error(f"メニュー取得エラー: {e}")
             traceback.print_exc()
             await message.reply("メニューの取得中にエラーが発生しました。")
 
-
-intents = discord.Intents.default()
-intents.message_content = True
-client = UnifiedBot(intents=intents)
-
-
-def run_bot(token):
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-    try:
-        loop.run_until_complete(client.start(token))
-    except HTTPException as e:
-        if e.status == 429:
-            logger.error(
-                "DiscordからRate Limitされています。"
-                "Renderの 'Manual Deploy' > 'Clear Cache & Deploy' を実行してください。"
-            )
-        else:
-            logger.error(f"HTTPエラー: {e}")
-    except Exception as e:
-        logger.error(f"Botスレッドでエラー: {e}")
-        traceback.print_exc()
-    finally:
-        loop.close()
+    async def handle_all(self, message):
+        logger.info("全部コマンド受信")
+        parts = []
+        try:
+            uranai = self._fetch_uranai()
+            if uranai:
+                parts.append("🔮 **今日の占い**\n" + uranai)
+            else:
+                parts.append("🔮 **今日の占い**\n占いデータが見つかりませんでした。")
+        except Exception as e:
+            logger.error(f"占い実行エラー: {e}")
+            parts.append("🔮 **今日の占い**\n占いの取得に失敗しました…")
+        try:
+            if FOOD_SPREADSHEET_ID:
+                food = self._fetch_food()
+                if food:
+                    parts.append("🍽️ **今日のご飯**\n" + food)
+                else:
+                    parts.append("🍽️ **今日のご飯**\nメニューが見つかりませんでした。")
+        except Exception as e:
+            logger.error(f"メニュー取得エラー: {e}")
+            parts.append("🍽️ **今日のご飯**\nメニューの取得に失敗しました…")
+        await message.reply("\n\n".join(parts))
 
 
 if __name__ == "__main__":
-    logger.info("--- 起動診断開始 ---")
     bot_token = os.getenv("DISCORD_BOT_TOKEN")
-
-    if bot_token:
-        logger.info("DISCORD_BOT_TOKEN: 読み込み成功")
-        logger.info("Botスレッドを起動します...")
-        bot_thread = threading.Thread(target=run_bot, args=(bot_token,), daemon=True)
-        bot_thread.start()
-    else:
+    if not bot_token:
         logger.error("DISCORD_BOT_TOKEN が見つかりません。")
+        sys.exit(1)
 
-    logger.info("--- 診断終了。Webサーバーを起動します... ---")
-    port = int(os.environ.get("PORT", 10000))
-    app.run(host="0.0.0.0", port=port)
+    logger.info("Bot を起動します...")
+    intents = discord.Intents.default()
+    intents.message_content = True
+    client = UnifiedBot(intents=intents)
+
+    # Run Discord client as main process (not in a thread).
+    # If it crashes or disconnects permanently, the process exits
+    # and systemd will restart it.
+    try:
+        client.run(bot_token, log_handler=None)
+    except Exception as e:
+        logger.error(f"Bot が異常終了しました: {e}")
+        traceback.print_exc()
+        sys.exit(1)
